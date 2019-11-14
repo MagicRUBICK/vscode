@@ -138,6 +138,32 @@ export class ExtHostDebugService implements IExtHostDebugService, ExtHostDebugSe
 		});
 	}
 
+	public asDebugSourceUri(src: vscode.DebugSource, session?: vscode.DebugSession): URI {
+
+		const source = <any>src;
+
+		if (typeof source.sourceReference === 'number') {
+			// src can be retrieved via DAP's "source" request
+
+			let debug = `debug:${encodeURIComponent(source.path || '')}`;
+			let sep = '?';
+
+			if (session) {
+				debug += `${sep}session=${encodeURIComponent(session.id)}`;
+				sep = '&';
+			}
+
+			debug += `${sep}ref=${source.sourceReference}`;
+
+			return URI.parse(debug);
+		} else if (source.path) {
+			// src is just a local file path
+			return URI.file(source.path);
+		} else {
+			throw new Error(`cannot create uri from DAP 'source' object; properties 'path' and 'sourceReference' are both missing.`);
+		}
+	}
+
 	private registerAllDebugTypes(extensionRegistry: ExtensionDescriptionRegistry) {
 
 		const debugTypes: string[] = [];
@@ -340,46 +366,38 @@ export class ExtHostDebugService implements IExtHostDebugService, ExtHostDebugSe
 				});
 			}
 
-			return new Promise(resolve => {
-				if (this._integratedTerminalInstance) {
-					this._integratedTerminalInstance.processId.then(pid => {
-						resolve(hasChildProcesses(pid));
-					}, err => {
-						resolve(true);
-					});
-				} else {
-					resolve(true);
-				}
-			}).then(async needNewTerminal => {
+			let needNewTerminal = true;	// be pessimistic
+			if (this._integratedTerminalInstance) {
+				const pid = await this._integratedTerminalInstance.processId;
+				needNewTerminal = await hasChildProcesses(pid);		// if no processes running in terminal reuse terminal
+			}
 
-				const configProvider = await this._configurationService.getConfigProvider();
-				const shell = this._terminalService.getDefaultShell(true, configProvider);
+			const configProvider = await this._configurationService.getConfigProvider();
+			const shell = this._terminalService.getDefaultShell(true, configProvider);
 
-				if (needNewTerminal || !this._integratedTerminalInstance) {
-					const options: vscode.TerminalOptions = {
-						shellPath: shell,
-						// shellArgs: this._terminalService._getDefaultShellArgs(configProvider),
-						cwd: args.cwd,
-						name: args.title || nls.localize('debug.terminal.title', "debuggee"),
-						env: args.env
-					};
-					delete args.cwd;
-					delete args.env;
-					this._integratedTerminalInstance = this._terminalService.createTerminalFromOptions(options);
-				}
-				const terminal: vscode.Terminal = this._integratedTerminalInstance;
+			if (needNewTerminal || !this._integratedTerminalInstance) {
 
-				terminal.show();
+				const options: vscode.TerminalOptions = {
+					shellPath: shell,
+					// shellArgs: this._terminalService._getDefaultShellArgs(configProvider),
+					cwd: args.cwd,
+					name: args.title || nls.localize('debug.terminal.title', "debuggee"),
+					env: args.env
+				};
+				delete args.cwd;
+				delete args.env;
+				this._integratedTerminalInstance = this._terminalService.createTerminalFromOptions(options);
+			}
 
-				return this._integratedTerminalInstance.processId.then(shellProcessId => {
+			const terminal = this._integratedTerminalInstance;
 
-					const command = prepareCommand(args, shell, configProvider);
+			terminal.show();
 
-					terminal.sendText(command, true);
+			const shellProcessId = await this._integratedTerminalInstance.processId;
+			const command = prepareCommand(args, shell, configProvider);
+			terminal.sendText(command, true);
 
-					return shellProcessId;
-				});
-			});
+			return shellProcessId;
 
 		} else if (args.kind === 'external') {
 
@@ -391,7 +409,7 @@ export class ExtHostDebugService implements IExtHostDebugService, ExtHostDebugSe
 	public async $substituteVariables(folderUri: UriComponents | undefined, config: IConfig): Promise<IConfig> {
 		if (!this._variableResolver) {
 			const [workspaceFolders, configProvider] = await Promise.all([this._workspaceService.getWorkspaceFolders2(), this._configurationService.getConfigProvider()]);
-			this._variableResolver = new ExtHostVariableResolverService(workspaceFolders || [], this._editorsService, configProvider);
+			this._variableResolver = new ExtHostVariableResolverService(workspaceFolders || [], this._editorsService, configProvider!);
 		}
 		let ws: IWorkspaceFolder | undefined;
 		const folder = await this.getFolder(folderUri);
@@ -791,7 +809,7 @@ export class ExtHostDebugService implements IExtHostDebugService, ExtHostDebugSe
 				}
 				return undefined;
 			}),
-			new Promise((resolve, reject) => {
+			new Promise<never>((resolve, reject) => {
 				const timeout = setTimeout(() => {
 					clearTimeout(timeout);
 					reject(new Error('timeout'));

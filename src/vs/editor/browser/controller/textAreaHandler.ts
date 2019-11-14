@@ -25,13 +25,13 @@ import { Range } from 'vs/editor/common/core/range';
 import { Selection } from 'vs/editor/common/core/selection';
 import { ScrollType } from 'vs/editor/common/editorCommon';
 import { EndOfLinePreference } from 'vs/editor/common/model';
-import { HorizontalRange, RenderingContext, RestrictedRenderingContext } from 'vs/editor/common/view/renderingContext';
+import { RenderingContext, RestrictedRenderingContext, HorizontalPosition } from 'vs/editor/common/view/renderingContext';
 import { ViewContext } from 'vs/editor/common/view/viewContext';
 import * as viewEvents from 'vs/editor/common/view/viewEvents';
 import { AccessibilitySupport } from 'vs/platform/accessibility/common/accessibility';
 
 export interface ITextAreaHandlerHelper {
-	visibleRangeForPositionRelativeToEditor(lineNumber: number, column: number): HorizontalRange | null;
+	visibleRangeForPositionRelativeToEditor(lineNumber: number, column: number): HorizontalPosition | null;
 }
 
 class VisibleTextAreaData {
@@ -406,9 +406,13 @@ export class TextAreaHandler extends ViewPart {
 		this._textAreaInput.focusTextArea();
 	}
 
+	public refreshFocusState() {
+		this._textAreaInput.refreshFocusState();
+	}
+
 	// --- end view API
 
-	private _primaryCursorVisibleRange: HorizontalRange | null = null;
+	private _primaryCursorVisibleRange: HorizontalPosition | null = null;
 
 	public prepareRender(ctx: RenderingContext): void {
 		const primaryCursorPosition = new Position(this._selections[0].positionLineNumber, this._selections[0].positionColumn);
@@ -427,8 +431,7 @@ export class TextAreaHandler extends ViewPart {
 				this._visibleTextArea.top - this._scrollTop,
 				this._contentLeft + this._visibleTextArea.left - this._scrollLeft,
 				this._visibleTextArea.width,
-				this._lineHeight,
-				true
+				this._lineHeight
 			);
 			return;
 		}
@@ -454,23 +457,28 @@ export class TextAreaHandler extends ViewPart {
 		}
 
 		// The primary cursor is in the viewport (at least vertically) => place textarea on the cursor
+
+		if (platform.isMacintosh) {
+			// For the popup emoji input, we will make the text area as high as the line height
+			// We will also make the fontSize and lineHeight the correct dimensions to help with the placement of these pickers
+			this._renderInsideEditor(
+				top, left,
+				canUseZeroSizeTextarea ? 0 : 1, this._lineHeight
+			);
+			return;
+		}
+
 		this._renderInsideEditor(
 			top, left,
-			canUseZeroSizeTextarea ? 0 : 1, canUseZeroSizeTextarea ? 0 : 1,
-			false
+			canUseZeroSizeTextarea ? 0 : 1, canUseZeroSizeTextarea ? 0 : 1
 		);
 	}
 
-	private _renderInsideEditor(top: number, left: number, width: number, height: number, useEditorFont: boolean): void {
+	private _renderInsideEditor(top: number, left: number, width: number, height: number): void {
 		const ta = this.textArea;
 		const tac = this.textAreaCover;
 
-		if (useEditorFont) {
-			Configuration.applyFontInfo(ta, this._fontInfo);
-		} else {
-			ta.setFontSize(1);
-			ta.setLineHeight(this._fontInfo.lineHeight);
-		}
+		Configuration.applyFontInfo(ta, this._fontInfo);
 
 		ta.setTop(top);
 		ta.setLeft(left);

@@ -5,8 +5,7 @@
 
 import 'vs/css!./media/fileactions';
 import * as nls from 'vs/nls';
-import * as types from 'vs/base/common/types';
-import { isWindows } from 'vs/base/common/platform';
+import { isWindows, isWeb } from 'vs/base/common/platform';
 import * as extpath from 'vs/base/common/extpath';
 import { extname, basename } from 'vs/base/common/path';
 import * as resources from 'vs/base/common/resources';
@@ -17,10 +16,9 @@ import { Action } from 'vs/base/common/actions';
 import { dispose, IDisposable } from 'vs/base/common/lifecycle';
 import { VIEWLET_ID, IExplorerService, IFilesConfiguration } from 'vs/workbench/contrib/files/common/files';
 import { ITextFileService } from 'vs/workbench/services/textfile/common/textfiles';
-import { IFileService, AutoSaveConfiguration } from 'vs/platform/files/common/files';
+import { IFileService } from 'vs/platform/files/common/files';
 import { toResource, SideBySideEditor } from 'vs/workbench/common/editor';
 import { ExplorerViewlet } from 'vs/workbench/contrib/files/browser/explorerViewlet';
-import { IUntitledEditorService } from 'vs/workbench/services/untitled/common/untitledEditorService';
 import { IQuickOpenService } from 'vs/platform/quickOpen/common/quickOpen';
 import { IViewletService } from 'vs/workbench/services/viewlet/browser/viewlet';
 import { IInstantiationService, ServicesAccessor } from 'vs/platform/instantiation/common/instantiation';
@@ -36,7 +34,7 @@ import { ICommandService, CommandsRegistry } from 'vs/platform/commands/common/c
 import { IListService, ListWidget } from 'vs/platform/list/browser/listService';
 import { RawContextKey } from 'vs/platform/contextkey/common/contextkey';
 import { Schemas } from 'vs/base/common/network';
-import { IDialogService, IConfirmationResult, getConfirmMessage } from 'vs/platform/dialogs/common/dialogs';
+import { IDialogService, IConfirmationResult, getConfirmMessage, IFileDialogService } from 'vs/platform/dialogs/common/dialogs';
 import { INotificationService, Severity } from 'vs/platform/notification/common/notification';
 import { IEditorService } from 'vs/workbench/services/editor/common/editorService';
 import { Constants } from 'vs/base/common/uint';
@@ -45,6 +43,10 @@ import { coalesce } from 'vs/base/common/arrays';
 import { AsyncDataTree } from 'vs/base/browser/ui/tree/asyncDataTree';
 import { ExplorerItem, NewExplorerItem } from 'vs/workbench/contrib/files/common/explorerModel';
 import { onUnexpectedError, getErrorMessage } from 'vs/base/common/errors';
+import { asDomUri, triggerDownload } from 'vs/base/browser/dom';
+import { mnemonicButtonLabel } from 'vs/base/common/labels';
+import { IFilesConfigurationService } from 'vs/workbench/services/filesConfiguration/common/filesConfigurationService';
+import { IWorkingCopyService } from 'vs/workbench/services/workingCopy/common/workingCopyService';
 
 export const NEW_FILE_COMMAND_ID = 'explorer.newFile';
 export const NEW_FILE_LABEL = nls.localize('newFile', "New File");
@@ -61,6 +63,8 @@ export const COPY_FILE_LABEL = nls.localize('copyFile', "Copy");
 export const PASTE_FILE_LABEL = nls.localize('pasteFile', "Paste");
 
 export const FileCopiedContext = new RawContextKey<boolean>('fileCopied', false);
+
+export const DOWNLOAD_LABEL = nls.localize('download', "Download");
 
 const CONFIRM_DELETE_SETTING_KEY = 'explorer.confirmDelete';
 
@@ -492,26 +496,13 @@ export class ToggleAutoSaveAction extends Action {
 	constructor(
 		id: string,
 		label: string,
-		@IConfigurationService private readonly configurationService: IConfigurationService
+		@IFilesConfigurationService private readonly filesConfigurationService: IFilesConfigurationService
 	) {
 		super(id, label);
 	}
 
 	run(): Promise<any> {
-		const setting = this.configurationService.inspect('files.autoSave');
-		let userAutoSaveConfig = setting.user;
-		if (types.isUndefinedOrNull(userAutoSaveConfig)) {
-			userAutoSaveConfig = setting.default; // use default if setting not defined
-		}
-
-		let newAutoSaveValue: string;
-		if ([AutoSaveConfiguration.AFTER_DELAY, AutoSaveConfiguration.ON_FOCUS_CHANGE, AutoSaveConfiguration.ON_WINDOW_CHANGE].some(s => s === userAutoSaveConfig)) {
-			newAutoSaveValue = AutoSaveConfiguration.OFF;
-		} else {
-			newAutoSaveValue = AutoSaveConfiguration.AFTER_DELAY;
-		}
-
-		return this.configurationService.updateValue('files.autoSave', newAutoSaveValue, ConfigurationTarget.USER);
+		return this.filesConfigurationService.toggleAutoSave();
 	}
 }
 
@@ -521,38 +512,30 @@ export abstract class BaseSaveAllAction extends Action {
 	constructor(
 		id: string,
 		label: string,
-		@ITextFileService private readonly textFileService: ITextFileService,
-		@IUntitledEditorService private readonly untitledEditorService: IUntitledEditorService,
 		@ICommandService protected commandService: ICommandService,
 		@INotificationService private notificationService: INotificationService,
+		@IWorkingCopyService private readonly workingCopyService: IWorkingCopyService
 	) {
 		super(id, label);
 
-		this.lastIsDirty = this.textFileService.isDirty();
+		this.lastIsDirty = this.workingCopyService.hasDirty;
 		this.enabled = this.lastIsDirty;
 
 		this.registerListeners();
 	}
 
-	protected abstract includeUntitled(): boolean;
 	protected abstract doRun(context: any): Promise<any>;
 
 	private registerListeners(): void {
 
-		// listen to files being changed locally
-		this._register(this.textFileService.models.onModelsDirty(e => this.updateEnablement(true)));
-		this._register(this.textFileService.models.onModelsSaved(e => this.updateEnablement(false)));
-		this._register(this.textFileService.models.onModelsReverted(e => this.updateEnablement(false)));
-		this._register(this.textFileService.models.onModelsSaveError(e => this.updateEnablement(true)));
-
-		if (this.includeUntitled()) {
-			this._register(this.untitledEditorService.onDidChangeDirty(resource => this.updateEnablement(this.untitledEditorService.isDirty(resource))));
-		}
+		// update enablement based on working copy changes
+		this._register(this.workingCopyService.onDidChangeDirty(() => this.updateEnablement()));
 	}
 
-	private updateEnablement(isDirty: boolean): void {
-		if (this.lastIsDirty !== isDirty) {
-			this.enabled = this.textFileService.isDirty();
+	private updateEnablement(): void {
+		const hasDirty = this.workingCopyService.hasDirty;
+		if (this.lastIsDirty !== hasDirty) {
+			this.enabled = hasDirty;
 			this.lastIsDirty = this.enabled;
 		}
 	}
@@ -578,10 +561,6 @@ export class SaveAllAction extends BaseSaveAllAction {
 	protected doRun(context: any): Promise<any> {
 		return this.commandService.executeCommand(SAVE_ALL_COMMAND_ID);
 	}
-
-	protected includeUntitled(): boolean {
-		return true;
-	}
 }
 
 export class SaveAllInGroupAction extends BaseSaveAllAction {
@@ -595,10 +574,6 @@ export class SaveAllInGroupAction extends BaseSaveAllAction {
 
 	protected doRun(context: any): Promise<any> {
 		return this.commandService.executeCommand(SAVE_ALL_IN_GROUP_COMMAND_ID, {}, context);
-	}
-
-	protected includeUntitled(): boolean {
-		return true;
 	}
 }
 
@@ -762,7 +737,7 @@ export function validateFileName(item: ExplorerItem, name: string): string | nul
 
 	if (name !== item.name) {
 		// Do not allow to overwrite existing file
-		const child = parent && parent.getChild(name);
+		const child = parent?.getChild(name);
 		if (child && child !== item) {
 			return nls.localize('fileNameExistsError', "A file or folder **{0}** already exists at this location. Please choose a different name.", name);
 		}
@@ -778,7 +753,7 @@ export function validateFileName(item: ExplorerItem, name: string): string | nul
 }
 
 function trimLongName(name: string): string {
-	if (name && name.length > 255) {
+	if (name?.length > 255) {
 		return `${name.substr(0, 255)}...`;
 	}
 
@@ -1044,12 +1019,32 @@ const downloadFileHandler = (accessor: ServicesAccessor) => {
 		return;
 	}
 	const explorerContext = getContext(listService.lastFocusedList);
-	const textFileService = accessor.get(ITextFileService);
+	const fileService = accessor.get(IFileService);
+	const fileDialogService = accessor.get(IFileDialogService);
 
 	if (explorerContext.stat) {
 		const stats = explorerContext.selection.length > 1 ? explorerContext.selection : [explorerContext.stat];
 		stats.forEach(async s => {
-			await textFileService.saveAs(s.resource, undefined, { availableFileSystems: [Schemas.file] });
+			if (isWeb) {
+				if (!s.isDirectory) {
+					triggerDownload(asDomUri(s.resource), s.name);
+				}
+			} else {
+				let defaultUri = s.isDirectory ? fileDialogService.defaultFolderPath() : fileDialogService.defaultFilePath();
+				if (defaultUri && !s.isDirectory) {
+					defaultUri = resources.joinPath(defaultUri, s.name);
+				}
+
+				const destination = await fileDialogService.showSaveDialog({
+					availableFileSystems: [Schemas.file],
+					saveLabel: mnemonicButtonLabel(nls.localize('download', "Download")),
+					title: s.isDirectory ? nls.localize('downloadFolder', "Download Folder") : nls.localize('downloadFile', "Download File"),
+					defaultUri
+				});
+				if (destination) {
+					await fileService.copy(s.resource, destination);
+				}
+			}
 		});
 	}
 };

@@ -35,7 +35,7 @@ import BaseHtml from 'vs/code/electron-browser/issue/issueReporterPage';
 import { LoggerChannelClient, FollowerLogService } from 'vs/platform/log/common/logIpc';
 import { ILogService, getLogLevel } from 'vs/platform/log/common/log';
 import { CodiconLabel } from 'vs/base/browser/ui/codiconLabel/codiconLabel';
-import { normalizeGitHubUrl } from 'vs/code/electron-browser/issue/issueReporterUtil';
+import { normalizeGitHubUrl } from 'vs/code/common/issue/issueReporterUtil';
 import { Button } from 'vs/base/browser/ui/button/button';
 import { SystemInfo, isRemoteDiagnosticError } from 'vs/platform/diagnostics/common/diagnostics';
 import { SpdLogService } from 'vs/platform/log/node/spdlogService';
@@ -1119,16 +1119,6 @@ export class IssueReporter extends Disposable {
 		if (element) {
 			return element;
 		} else {
-			const error = new Error(`${elementId} not found.`);
-			this.logService.error(error);
-			type IssueReporterGetElementErrorClassification = {
-				message: { classification: 'CallstackOrException', purpose: 'PerformanceAndHealth' };
-			};
-			type IssueReporterGetElementErrorEvent = {
-				message: string;
-			};
-			this.telemetryService.publicLog2<IssueReporterGetElementErrorEvent, IssueReporterGetElementErrorClassification>('issueReporterGetElementError', { message: error.message });
-
 			return undefined;
 		}
 	}

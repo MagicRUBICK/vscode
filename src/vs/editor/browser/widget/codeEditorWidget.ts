@@ -4,7 +4,6 @@
  *--------------------------------------------------------------------------------------------*/
 
 import 'vs/css!./media/editor';
-import 'vs/css!./media/tokens';
 import * as nls from 'vs/nls';
 import * as dom from 'vs/base/browser/dom';
 import { IKeyboardEvent } from 'vs/base/browser/keyboardEvent';
@@ -870,9 +869,11 @@ export class CodeEditorWidget extends Disposable implements editorBrowser.ICodeE
 	}
 
 	public onVisible(): void {
+		this._modelData?.view.refreshFocusState();
 	}
 
 	public onHide(): void {
+		this._modelData?.view.refreshFocusState();
 	}
 
 	public getContribution<T extends editorCommon.IEditorContribution>(id: string): T {
@@ -1371,6 +1372,9 @@ export class CodeEditorWidget extends Disposable implements editorBrowser.ICodeE
 			const e2: ICursorSelectionChangedEvent = {
 				selection: e.selections[0],
 				secondarySelections: e.selections.slice(1),
+				modelVersionId: e.modelVersionId,
+				oldSelections: e.oldSelections,
+				oldModelVersionId: e.oldModelVersionId,
 				source: e.source,
 				reason: e.reason
 			};

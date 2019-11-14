@@ -289,6 +289,13 @@ export class DebugService implements IDebugService {
 					throw new Error(nls.localize({ key: 'compoundMustHaveConfigurations', comment: ['compound indicates a "compounds" configuration item', '"configurations" is an attribute and should not be localized'] },
 						"Compound must have \"configurations\" attribute set in order to start multiple configurations."));
 				}
+				if (compound.preLaunchTask) {
+					const taskResult = await this.runTaskAndCheckErrors(launch?.workspace || this.contextService.getWorkspace(), compound.preLaunchTask);
+					if (taskResult === TaskRunResult.Failure) {
+						this.endInitializingState();
+						return false;
+					}
+				}
 
 				const values = await Promise.all(compound.configurations.map(configData => {
 					const name = typeof configData === 'string' ? configData : configData.name;
@@ -394,10 +401,10 @@ export class DebugService implements IDebugService {
 					return false;
 				}
 
-				const workspace = launch ? launch.workspace : undefined;
+				const workspace = launch ? launch.workspace : this.contextService.getWorkspace();
 				const taskResult = await this.runTaskAndCheckErrors(workspace, resolvedConfig.preLaunchTask);
 				if (taskResult === TaskRunResult.Success) {
-					return this.doCreateSession(workspace, { resolved: resolvedConfig, unresolved: unresolvedConfig }, options);
+					return this.doCreateSession(launch?.workspace, { resolved: resolvedConfig, unresolved: unresolvedConfig }, options);
 				}
 				return false;
 			} catch (err) {
@@ -481,8 +488,6 @@ export class DebugService implements IDebugService {
 			}
 
 			const errorMessage = error instanceof Error ? error.message : error;
-			this.telemetryDebugMisconfiguration(session.configuration ? session.configuration.type : undefined, errorMessage);
-
 			await this.showError(errorMessage, isErrorWithActions(error) ? error.actions : []);
 			return false;
 		}
@@ -701,7 +706,7 @@ export class DebugService implements IDebugService {
 
 	//---- task management
 
-	private async runTaskAndCheckErrors(root: IWorkspaceFolder | undefined, taskId: string | TaskIdentifier | undefined): Promise<TaskRunResult> {
+	private async runTaskAndCheckErrors(root: IWorkspaceFolder | IWorkspace | undefined, taskId: string | TaskIdentifier | undefined): Promise<TaskRunResult> {
 		try {
 			const taskSummary = await this.runTask(root, taskId);
 
@@ -786,6 +791,7 @@ export class DebugService implements IDebugService {
 				// Check that the task isn't busy and if it is, wait for it
 				const busyTasks = await this.taskService.getBusyTasks();
 				if (busyTasks.filter(t => t._id === task._id).length) {
+					taskStarted = true;
 					return inactivePromise;
 				}
 				// task is already running and isn't busy - nothing to do.
@@ -1190,19 +1196,6 @@ export class DebugService implements IDebugService {
 			sessionLengthInSeconds: adapterExitEvent.sessionLengthInSeconds,
 			breakpointCount: breakpoints.length,
 			watchExpressionsCount: this.model.getWatchExpressions().length
-		});
-	}
-
-	private telemetryDebugMisconfiguration(debugType: string | undefined, message: string): Promise<any> {
-		/* __GDPR__
-			"debugMisconfiguration" : {
-				"type" : { "classification": "SystemMetaData", "purpose": "FeatureInsight" },
-				"error": { "classification": "CallstackOrException", "purpose": "FeatureInsight" }
-			}
-		*/
-		return this.telemetryService.publicLog('debugMisconfiguration', {
-			type: debugType,
-			error: message
 		});
 	}
 

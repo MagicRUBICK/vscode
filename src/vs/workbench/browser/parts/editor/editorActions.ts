@@ -425,7 +425,7 @@ export class OpenToSideFromQuickOpenAction extends Action {
 			const input = entry.getInput();
 			if (input) {
 				if (input instanceof EditorInput) {
-					return this.editorService.openEditor(input, entry.getOptions() || undefined, SIDE_GROUP);
+					return this.editorService.openEditor(input, entry.getOptions(), SIDE_GROUP);
 				}
 
 				const resourceInput = input as IResourceInput;
@@ -1273,8 +1273,6 @@ export class BaseQuickOpenEditorInGroupAction extends Action {
 
 	run(): Promise<any> {
 		const keys = this.keybindingService.lookupKeybindings(this.id);
-
-
 
 		this.quickOpenService.show(NAVIGATE_IN_ACTIVE_GROUP_PREFIX, { quickNavigateConfiguration: { keybindings: keys } });
 

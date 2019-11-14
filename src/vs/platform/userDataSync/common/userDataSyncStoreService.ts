@@ -11,7 +11,7 @@ import { URI } from 'vs/base/common/uri';
 import { joinPath } from 'vs/base/common/resources';
 import { CancellationToken } from 'vs/base/common/cancellation';
 import { IHeaders, IRequestOptions, IRequestContext } from 'vs/base/parts/request/common/request';
-import { IAuthTokenService, AuthTokenStatus } from 'vs/platform/auth/common/auth';
+import { IAuthTokenService } from 'vs/platform/auth/common/auth';
 
 export class UserDataSyncStoreService extends Disposable implements IUserDataSyncStoreService {
 
@@ -29,7 +29,7 @@ export class UserDataSyncStoreService extends Disposable implements IUserDataSyn
 
 	async read(key: string, oldValue: IUserData | null): Promise<IUserData> {
 		if (!this.enabled) {
-			return Promise.reject(new Error('No settings sync store url configured.'));
+			throw new Error('No settings sync store url configured.');
 		}
 
 		const url = joinPath(URI.parse(this.productService.settingsSyncStoreUrl!), 'resource', key, 'latest').toString();
@@ -59,7 +59,7 @@ export class UserDataSyncStoreService extends Disposable implements IUserDataSyn
 
 	async write(key: string, data: string, ref: string | null): Promise<string> {
 		if (!this.enabled) {
-			return Promise.reject(new Error('No settings sync store url configured.'));
+			throw new Error('No settings sync store url configured.');
 		}
 
 		const url = joinPath(URI.parse(this.productService.settingsSyncStoreUrl!), 'resource', key).toString();
@@ -87,21 +87,17 @@ export class UserDataSyncStoreService extends Disposable implements IUserDataSyn
 	}
 
 	private async request(options: IRequestOptions, token: CancellationToken): Promise<IRequestContext> {
-		if (this.authTokenService.status !== AuthTokenStatus.Disabled) {
-			const authToken = await this.authTokenService.getToken();
-			if (!authToken) {
-				return Promise.reject(new Error('No Auth Token Available.'));
-			}
-			options.headers = options.headers || {};
-			options.headers['authorization'] = `Bearer ${authToken}`;
+		const authToken = await this.authTokenService.getToken();
+		if (!authToken) {
+			throw new Error('No Auth Token Available.');
 		}
+		options.headers = options.headers || {};
+		options.headers['authorization'] = `Bearer ${authToken}`;
 
 		const context = await this.requestService.request(options, token);
 
 		if (context.res.statusCode === 401) {
-			if (this.authTokenService.status !== AuthTokenStatus.Disabled) {
-				this.authTokenService.refreshToken();
-			}
+			this.authTokenService.refreshToken();
 			// Throw Unauthorized Error
 			throw new UserDataSyncStoreError('Unauthorized', UserDataSyncStoreErrorCode.Unauthroized);
 		}

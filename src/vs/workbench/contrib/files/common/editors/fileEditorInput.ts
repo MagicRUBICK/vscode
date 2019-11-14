@@ -10,13 +10,14 @@ import { URI } from 'vs/base/common/uri';
 import { EncodingMode, ConfirmResult, EditorInput, IFileEditorInput, ITextEditorModel, Verbosity, IRevertOptions } from 'vs/workbench/common/editor';
 import { TextFileEditorModel } from 'vs/workbench/services/textfile/common/textFileEditorModel';
 import { BinaryEditorModel } from 'vs/workbench/common/editor/binaryEditorModel';
-import { FileOperationError, FileOperationResult } from 'vs/platform/files/common/files';
-import { ITextFileService, AutoSaveMode, ModelState, TextFileModelChangeEvent, LoadReason, TextFileOperationError, TextFileOperationResult } from 'vs/workbench/services/textfile/common/textfiles';
+import { FileOperationError, FileOperationResult, IFileService } from 'vs/platform/files/common/files';
+import { ITextFileService, ModelState, TextFileModelChangeEvent, LoadReason, TextFileOperationError, TextFileOperationResult } from 'vs/workbench/services/textfile/common/textfiles';
 import { IInstantiationService } from 'vs/platform/instantiation/common/instantiation';
 import { IReference } from 'vs/base/common/lifecycle';
 import { ITextModelService } from 'vs/editor/common/services/resolverService';
 import { FILE_EDITOR_INPUT_ID, TEXT_FILE_EDITOR_ID, BINARY_FILE_EDITOR_ID } from 'vs/workbench/contrib/files/common/files';
 import { ILabelService } from 'vs/platform/label/common/label';
+import { IFilesConfigurationService, AutoSaveMode } from 'vs/workbench/services/filesConfiguration/common/filesConfigurationService';
 
 const enum ForceOpenAs {
 	None,
@@ -48,7 +49,9 @@ export class FileEditorInput extends EditorInput implements IFileEditorInput {
 		@IInstantiationService private readonly instantiationService: IInstantiationService,
 		@ITextFileService private readonly textFileService: ITextFileService,
 		@ITextModelService private readonly textModelResolverService: ITextModelService,
-		@ILabelService private readonly labelService: ILabelService
+		@ILabelService private readonly labelService: ILabelService,
+		@IFileService private readonly fileService: IFileService,
+		@IFilesConfigurationService private readonly filesConfigurationService: IFilesConfigurationService
 	) {
 		super();
 
@@ -72,6 +75,7 @@ export class FileEditorInput extends EditorInput implements IFileEditorInput {
 		this._register(this.textFileService.models.onModelReverted(e => this.onDirtyStateChange(e)));
 		this._register(this.textFileService.models.onModelOrphanedChanged(e => this.onModelOrphanedChanged(e)));
 		this._register(this.labelService.onDidChangeFormatters(() => FileEditorInput.MEMOIZER.clear()));
+		this._register(this.fileService.onDidChangeFileSystemProviderRegistrations(() => FileEditorInput.MEMOIZER.clear()));
 	}
 
 	private onDirtyStateChange(e: TextFileModelChangeEvent): void {
@@ -211,11 +215,11 @@ export class FileEditorInput extends EditorInput implements IFileEditorInput {
 	private decorateLabel(label: string): string {
 		const model = this.textFileService.models.get(this.resource);
 
-		if (model && model.hasState(ModelState.ORPHAN)) {
+		if (model?.hasState(ModelState.ORPHAN)) {
 			return localize('orphanedFile', "{0} (deleted)", label);
 		}
 
-		if (model && model.isReadonly()) {
+		if (model?.isReadonly()) {
 			return localize('readonlyFile', "{0} (read-only)", label);
 		}
 
@@ -232,7 +236,7 @@ export class FileEditorInput extends EditorInput implements IFileEditorInput {
 			return true; // always indicate dirty state if we are in conflict or error state
 		}
 
-		if (this.textFileService.getAutoSaveMode() === AutoSaveMode.AFTER_SHORT_DELAY) {
+		if (this.filesConfigurationService.getAutoSaveMode() === AutoSaveMode.AFTER_SHORT_DELAY) {
 			return false; // fast auto save enabled so we do not declare dirty
 		}
 

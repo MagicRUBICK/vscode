@@ -55,6 +55,7 @@ import { DefaultSettingsEditorModel, SettingsEditorModel } from 'vs/workbench/se
 import { ITextFileService } from 'vs/workbench/services/textfile/common/textfiles';
 import { IHostService } from 'vs/workbench/services/host/browser/host';
 import { withNullAsUndefined, withUndefinedAsNull, assertIsDefined } from 'vs/base/common/types';
+import { IFilesConfigurationService } from 'vs/workbench/services/filesConfiguration/common/filesConfigurationService';
 
 export class PreferencesEditor extends BaseEditor {
 
@@ -634,7 +635,7 @@ class PreferencesRenderersController extends Disposable {
 
 				if (filterResult) {
 					filterResult.query = filter;
-					filterResult.exactMatch = searchResult && searchResult.exactMatch;
+					filterResult.exactMatch = !!searchResult && searchResult.exactMatch;
 				}
 
 				return filterResult;
@@ -981,9 +982,10 @@ export class DefaultPreferencesEditor extends BaseTextEditor {
 		@ITextFileService textFileService: ITextFileService,
 		@IEditorGroupsService editorGroupService: IEditorGroupsService,
 		@IEditorService editorService: IEditorService,
-		@IHostService hostService: IHostService
+		@IHostService hostService: IHostService,
+		@IFilesConfigurationService filesConfigurationService: IFilesConfigurationService
 	) {
-		super(DefaultPreferencesEditor.ID, telemetryService, instantiationService, storageService, configurationService, themeService, textFileService, editorService, editorGroupService, hostService);
+		super(DefaultPreferencesEditor.ID, telemetryService, instantiationService, storageService, configurationService, themeService, textFileService, editorService, editorGroupService, hostService, filesConfigurationService);
 	}
 
 	private static _getContributions(): IEditorContributionDescription[] {

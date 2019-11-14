@@ -45,7 +45,7 @@ export class ProgressService extends Disposable implements IProgressService {
 		super();
 	}
 
-	withProgress<R = unknown>(options: IProgressOptions, task: (progress: IProgress<IProgressStep>) => Promise<R>, onDidCancel?: (choice?: number) => void): Promise<R> {
+	async withProgress<R = unknown>(options: IProgressOptions, task: (progress: IProgress<IProgressStep>) => Promise<R>, onDidCancel?: (choice?: number) => void): Promise<R> {
 		const { location } = options;
 		if (typeof location === 'string') {
 			if (this.viewletService.getProgressIndicator(location)) {
@@ -56,7 +56,7 @@ export class ProgressService extends Disposable implements IProgressService {
 				return this.withPanelProgress(location, task, { ...options, location });
 			}
 
-			return Promise.reject(new Error(`Bad progress location: ${location}`));
+			throw new Error(`Bad progress location: ${location}`);
 		}
 
 		switch (location) {
@@ -73,7 +73,7 @@ export class ProgressService extends Disposable implements IProgressService {
 			case ProgressLocation.Dialog:
 				return this.withDialogProgress(options, task, onDidCancel);
 			default:
-				return Promise.reject(new Error(`Bad progress location: ${location}`));
+				throw new Error(`Bad progress location: ${location}`);
 		}
 	}
 
@@ -366,7 +366,7 @@ export class ProgressService extends Disposable implements IProgressService {
 					cancelId: buttons.length - 1,
 					keyEventProcessor: (event: StandardKeyboardEvent) => {
 						const resolved = this.keybindingService.softDispatch(event, this.layoutService.container);
-						if (resolved && resolved.commandId) {
+						if (resolved?.commandId) {
 							if (allowableCommands.indexOf(resolved.commandId) === -1) {
 								EventHelper.stop(event, true);
 							}

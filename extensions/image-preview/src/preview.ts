@@ -11,15 +11,62 @@ import { Scale, ZoomStatusBarEntry } from './zoomStatusBarEntry';
 
 const localize = nls.loadMessageBundle();
 
+
+export class PreviewManager {
+
+	public static readonly viewType = 'imagePreview.previewEditor';
+
+	private readonly _previews = new Set<Preview>();
+	private _activePreview: Preview | undefined;
+
+	constructor(
+		private readonly extensionRoot: vscode.Uri,
+		private readonly sizeStatusBarEntry: SizeStatusBarEntry,
+		private readonly zoomStatusBarEntry: ZoomStatusBarEntry,
+	) { }
+
+	public resolve(
+		resource: vscode.Uri,
+		webviewEditor: vscode.WebviewPanel,
+	): vscode.WebviewEditorCapabilities {
+		const preview = new Preview(this.extensionRoot, resource, webviewEditor, this.sizeStatusBarEntry, this.zoomStatusBarEntry);
+		this._previews.add(preview);
+		this.setActivePreview(preview);
+
+		webviewEditor.onDidDispose(() => { this._previews.delete(preview); });
+
+		webviewEditor.onDidChangeViewState(() => {
+			if (webviewEditor.active) {
+				this.setActivePreview(preview);
+			} else if (this._activePreview === preview && !webviewEditor.active) {
+				this.setActivePreview(undefined);
+			}
+		});
+
+		return {
+			editingCapability: preview
+		};
+	}
+
+	public get activePreview() { return this._activePreview; }
+
+	private setActivePreview(value: Preview | undefined): void {
+		this._activePreview = value;
+		this.setPreviewActiveContext(!!value);
+	}
+
+	private setPreviewActiveContext(value: boolean) {
+		vscode.commands.executeCommand('setContext', 'imagePreviewFocus', value);
+	}
+}
+
 const enum PreviewState {
 	Disposed,
 	Visible,
 	Active,
 }
 
-export class Preview extends Disposable {
-
-	public static readonly viewType = 'imagePreview.previewEditor';
+class Preview extends Disposable implements vscode.WebviewEditorEditingCapability {
 
 	private readonly id: string = `${Date.now()}-${Math.random().toString()}`;
 
@@ -30,7 +77,7 @@ export class Preview extends Disposable {
 	constructor(
 		private readonly extensionRoot: vscode.Uri,
 		private readonly resource: vscode.Uri,
-		private readonly webviewEditor: vscode.WebviewEditor,
+		private readonly webviewEditor: vscode.WebviewPanel,
 		private readonly sizeStatusBarEntry: SizeStatusBarEntry,
 		private readonly zoomStatusBarEntry: ZoomStatusBarEntry,
 	) {
@@ -72,6 +119,7 @@ export class Preview extends Disposable {
 
 		this._register(webviewEditor.onDidChangeViewState(() => {
 			this.update();
+			this.webviewEditor.webview.postMessage({ type: 'setActive', value: this.webviewEditor.active });
 		}));
 
 		this._register(webviewEditor.onDidDispose(() => {
@@ -96,6 +144,19 @@ export class Preview extends Disposable {
 
 		this.render();
 		this.update();
+		this.webviewEditor.webview.postMessage({ type: 'setActive', value: this.webviewEditor.active });
+	}
+
+	public zoomIn() {
+		if (this._previewState === PreviewState.Active) {
+			this.webviewEditor.webview.postMessage({ type: 'zoomIn' });
+		}
+	}
+
+	public zoomOut() {
+		if (this._previewState === PreviewState.Active) {
+			this.webviewEditor.webview.postMessage({ type: 'zoomOut' });
+		}
 	}
 
 	private render() {
@@ -120,7 +181,6 @@ export class Preview extends Disposable {
 			}
 			this._previewState = PreviewState.Visible;
 		}
-		this.webviewEditor.webview.postMessage({ type: 'setActive', value: this.webviewEditor.active });
 	}
 
 	private getWebiewContents(): string {
@@ -136,8 +196,11 @@ export class Preview extends Disposable {
 <html lang="en">
 <head>
 	<meta charset="UTF-8">
-	<meta name="viewport" content="width=device-width, initial-scale=1.0">
-	<meta http-equiv="X-UA-Compatible" content="ie=edge">
+
+	<!-- Disable pinch zooming -->
+	<meta name="viewport"
+		content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no">
+
 	<title>Image Preview</title>
 
 	<link rel="stylesheet" href="${escapeAttribute(this.extensionResource('/media/main.css'))}" type="text/css" media="screen" nonce="${nonce}">
@@ -153,7 +216,7 @@ export class Preview extends Disposable {
 </html>`;
 	}
 
-	private getResourcePath(webviewEditor: vscode.WebviewEditor, resource: vscode.Uri, version: string) {
+	private getResourcePath(webviewEditor: vscode.WebviewPanel, resource: vscode.Uri, version: string) {
 		switch (resource.scheme) {
 			case 'data':
 				return encodeURI(resource.toString(true));
@@ -162,8 +225,11 @@ export class Preview extends Disposable {
 				// Show blank image
 				return encodeURI('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAEElEQVR42gEFAPr/AP///wAI/AL+Sr4t6gAAAABJRU5ErkJggg==');
 
-
 			default:
+				// Avoid adding cache busting if there is already a query string
+				if (resource.query) {
+					return encodeURI(webviewEditor.webview.asWebviewUri(resource).toString(true));
+				}
 				return encodeURI(webviewEditor.webview.asWebviewUri(resource).toString(true) + `?version=${version}`);
 		}
 	}
@@ -172,6 +238,24 @@ export class Preview extends Disposable {
 		return this.webviewEditor.webview.asWebviewUri(this.extensionRoot.with({
 			path: this.extensionRoot.path + path
 		}));
+	}
+
+	//#region WebviewEditorCapabilities
+	private readonly _onEdit = this._register(new vscode.EventEmitter<{ now: number }>());
+	public readonly onEdit = this._onEdit.event;
+
+	async save() { }
+
+	async hotExit() { }
+
+	async applyEdits(_edits: any[]) { }
+
+	async undoEdits(edits: any[]) { console.log('undo', edits); }
+
+	//#endregion
+
+	public test_makeEdit() {
+		this._onEdit.fire({ now: Date.now() });
 	}
 }
 

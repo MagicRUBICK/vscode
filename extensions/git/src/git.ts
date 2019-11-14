@@ -196,13 +196,13 @@ async function exec(child: cp.ChildProcess, cancellationToken?: CancellationToke
 		}),
 		new Promise<Buffer>(c => {
 			const buffers: Buffer[] = [];
-			on(child.stdout, 'data', (b: Buffer) => buffers.push(b));
-			once(child.stdout, 'close', () => c(Buffer.concat(buffers)));
+			on(child.stdout!, 'data', (b: Buffer) => buffers.push(b));
+			once(child.stdout!, 'close', () => c(Buffer.concat(buffers)));
 		}),
 		new Promise<string>(c => {
 			const buffers: Buffer[] = [];
-			on(child.stderr, 'data', (b: Buffer) => buffers.push(b));
-			once(child.stderr, 'close', () => c(Buffer.concat(buffers).toString('utf8')));
+			on(child.stderr!, 'data', (b: Buffer) => buffers.push(b));
+			once(child.stderr!, 'close', () => c(Buffer.concat(buffers).toString('utf8')));
 		})
 	]) as Promise<[number, Buffer, string]>;
 
@@ -360,7 +360,7 @@ export class Git {
 		const onSpawn = (child: cp.ChildProcess) => {
 			const decoder = new StringDecoder('utf8');
 			const lineStream = new byline.LineStream({ encoding: 'utf8' });
-			child.stderr.on('data', (buffer: Buffer) => lineStream.write(decoder.write(buffer)));
+			child.stderr!.on('data', (buffer: Buffer) => lineStream.write(decoder.write(buffer)));
 
 			let totalProgress = 0;
 			let previousProgress = 0;
@@ -401,7 +401,8 @@ export class Git {
 
 	async getRepositoryRoot(repositoryPath: string): Promise<string> {
 		const result = await this.exec(repositoryPath, ['rev-parse', '--show-toplevel']);
-		return path.normalize(result.stdout.trim());
+		// Keep trailing spaces which are part of the directory name
+		return path.normalize(result.stdout.trimLeft().replace(/(\r\n|\r|\n)+$/, ''));
 	}
 
 	async getRepositoryDotGit(repositoryPath: string): Promise<string> {
@@ -437,7 +438,7 @@ export class Git {
 		}
 
 		if (options.input) {
-			child.stdin.end(options.input, 'utf8');
+			child.stdin!.end(options.input, 'utf8');
 		}
 
 		const bufferResult = await exec(child, options.cancellationToken);
@@ -881,7 +882,7 @@ export class Repository {
 
 	async detectObjectType(object: string): Promise<{ mimetype: string, encoding?: string }> {
 		const child = await this.stream(['show', object]);
-		const buffer = await readBytes(child.stdout, 4100);
+		const buffer = await readBytes(child.stdout!, 4100);
 
 		try {
 			child.kill();
@@ -1150,7 +1151,7 @@ export class Repository {
 
 	async stage(path: string, data: string): Promise<void> {
 		const child = this.stream(['hash-object', '--stdin', '-w', '--path', path], { stdio: [null, null, null] });
-		child.stdin.end(data, 'utf8');
+		child.stdin!.end(data, 'utf8');
 
 		const { exitCode, stdout } = await exec(child);
 		const hash = stdout.toString('utf8');
@@ -1323,6 +1324,11 @@ export class Repository {
 			args = [...args, name];
 		}
 
+		await this.run(args);
+	}
+
+	async deleteTag(name: string): Promise<void> {
+		let args = ['tag', '-d', name];
 		await this.run(args);
 	}
 
@@ -1591,6 +1597,24 @@ export class Repository {
 		}
 	}
 
+	async dropStash(index?: number): Promise<void> {
+		const args = ['stash', 'drop'];
+
+		if (typeof index === 'number') {
+			args.push(`stash@{${index}}`);
+		}
+
+		try {
+			await this.run(args);
+		} catch (err) {
+			if (/No stash found/.test(err.stderr || '')) {
+				err.gitErrorCode = GitErrorCodes.NoStashFound;
+			}
+
+			throw err;
+		}
+	}
+
 	getStatus(limit = 5000): Promise<{ status: IFileStatus[]; didHitLimit: boolean; }> {
 		return new Promise<{ status: IFileStatus[]; didHitLimit: boolean; }>((c, e) => {
 			const parser = new GitStatusParser();
@@ -1617,19 +1641,19 @@ export class Repository {
 
 				if (parser.status.length > limit) {
 					child.removeListener('exit', onExit);
-					child.stdout.removeListener('data', onStdoutData);
+					child.stdout!.removeListener('data', onStdoutData);
 					child.kill();
 
 					c({ status: parser.status.slice(0, limit), didHitLimit: true });
 				}
 			};
 
-			child.stdout.setEncoding('utf8');
-			child.stdout.on('data', onStdoutData);
+			child.stdout!.setEncoding('utf8');
+			child.stdout!.on('data', onStdoutData);
 
 			const stderrData: string[] = [];
-			child.stderr.setEncoding('utf8');
-			child.stderr.on('data', raw => stderrData.push(raw as string));
+			child.stderr!.setEncoding('utf8');
+			child.stderr!.on('data', raw => stderrData.push(raw as string));
 
 			child.on('error', cpErrorHandler(e));
 			child.on('exit', onExit);
@@ -1789,10 +1813,18 @@ export class Repository {
 	}
 
 	cleanupCommitEditMessage(message: string): string {
-		//TODO: Support core.commentChar
-		return message.replace(/^\s*#.*$\n?/gm, '').trim();
-	}
+		// If the message is a single line starting with whitespace followed by `#`, just allow it.
+		if (/^\s*#[^\n]*$/.test(message)) {
+			return message;
+		}
 
+		// Else, remove all lines starting with whitespace followed by `#`.
+		// TODO: Support core.commentChar
+		return message.replace(/^(\s*#)(.*)$(\n?)/gm, (_, prefix, content, suffix) => {
+			// https://github.com/microsoft/vscode/issues/84201#issuecomment-552834814
+			return /^\d/.test(content) ? `${prefix}${content}${suffix}` : '';
+		}).trim();
+	}
 
 	async getMergeMessage(): Promise<string | undefined> {
 		const mergeMsgPath = path.join(this.repositoryRoot, '.git', 'MERGE_MSG');

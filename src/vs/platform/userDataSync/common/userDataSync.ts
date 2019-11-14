@@ -32,19 +32,19 @@ export function registerConfiguration(): IDisposable {
 		properties: {
 			'configurationSync.enable': {
 				type: 'boolean',
-				description: localize('configurationSync.enable', "When enabled, synchronises configuration that includes Settings and Extensions."),
-				default: true,
+				description: localize('configurationSync.enable', "When enabled, synchronizes configuration that includes Settings and Extensions."),
+				default: false,
 				scope: ConfigurationScope.APPLICATION
 			},
 			'configurationSync.enableSettings': {
 				type: 'boolean',
-				description: localize('configurationSync.enableSettings', "When enabled settings are synchronised while synchronizing configuration."),
+				description: localize('configurationSync.enableSettings', "When enabled settings are synchronized while synchronizing configuration."),
 				default: true,
 				scope: ConfigurationScope.APPLICATION,
 			},
 			'configurationSync.enableExtensions': {
 				type: 'boolean',
-				description: localize('configurationSync.enableExtensions', "When enabled extensions are synchronised while synchronizing configuration."),
+				description: localize('configurationSync.enableExtensions', "When enabled extensions are synchronized while synchronizing configuration."),
 				default: true,
 				scope: ConfigurationScope.APPLICATION,
 			},
@@ -63,12 +63,6 @@ export function registerConfiguration(): IDisposable {
 				$ref: ignoredSettingsSchemaId,
 				additionalProperties: true,
 				uniqueItems: true
-			},
-			'configurationSync.enableAuth': {
-				'type': 'boolean',
-				description: localize('configurationSync.enableAuth', "Enables authentication and requires VS Code restart when changed"),
-				'default': false,
-				'scope': ConfigurationScope.APPLICATION
 			}
 		}
 	});

@@ -30,7 +30,8 @@ export enum OverviewRulerLane {
  * Position in the minimap to render the decoration.
  */
 export enum MinimapPosition {
-	Inline = 1
+	Inline = 1,
+	Gutter = 2
 }
 
 export interface IDecorationOptions {
@@ -1190,6 +1191,13 @@ export interface ITextBufferBuilder {
 export interface ITextBufferFactory {
 	create(defaultEOL: DefaultEndOfLine): ITextBuffer;
 	getFirstLineText(lengthLimit: number): string;
+}
+
+/**
+ * @internal
+ */
+export const enum ModelConstants {
+	FIRST_LINE_DETECTION_LENGTH_LIMIT = 1000
 }
 
 /**

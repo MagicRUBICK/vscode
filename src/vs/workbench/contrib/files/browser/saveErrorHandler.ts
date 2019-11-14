@@ -28,7 +28,7 @@ import { INotificationService, INotificationHandle, INotificationActions, Severi
 import { IOpenerService } from 'vs/platform/opener/common/opener';
 import { IStorageService, StorageScope } from 'vs/platform/storage/common/storage';
 import { ExecuteCommandAction } from 'vs/platform/actions/common/actions';
-import { IEnvironmentService } from 'vs/platform/environment/common/environment';
+import { IProductService } from 'vs/platform/product/common/productService';
 import { Event } from 'vs/base/common/event';
 import { IEditorService } from 'vs/workbench/services/editor/common/editorService';
 import { isWindows } from 'vs/base/common/platform';
@@ -83,7 +83,7 @@ export class SaveErrorHandler extends Disposable implements ISaveErrorHandler, I
 		const activeInput = this.editorService.activeEditor;
 		if (activeInput instanceof DiffEditorInput && activeInput.originalInput instanceof ResourceEditorInput && activeInput.modifiedInput instanceof FileEditorInput) {
 			const resource = activeInput.originalInput.getResource();
-			if (resource && resource.scheme === CONFLICT_RESOLUTION_SCHEME) {
+			if (resource?.scheme === CONFLICT_RESOLUTION_SCHEME) {
 				isActiveEditorSaveConflictResolution = true;
 				activeConflictResolutionResource = activeInput.modifiedInput.getResource();
 			}
@@ -103,7 +103,7 @@ export class SaveErrorHandler extends Disposable implements ISaveErrorHandler, I
 
 	onSaveError(error: any, model: ITextFileEditorModel): void {
 		const fileOperationError = error as FileOperationError;
-		const resource = model.getResource();
+		const resource = model.resource;
 
 		let message: string;
 		const primaryActions: IAction[] = [];
@@ -113,7 +113,7 @@ export class SaveErrorHandler extends Disposable implements ISaveErrorHandler, I
 		if (fileOperationError.fileOperationResult === FileOperationResult.FILE_MODIFIED_SINCE) {
 
 			// If the user tried to save from the opened conflict editor, show its message again
-			if (this.activeConflictResolutionResource && this.activeConflictResolutionResource.toString() === model.getResource().toString()) {
+			if (this.activeConflictResolutionResource && this.activeConflictResolutionResource.toString() === model.resource.toString()) {
 				if (this.storageService.getBoolean(LEARN_MORE_DIRTY_WRITE_IGNORE_KEY, StorageScope.GLOBAL)) {
 					return; // return if this message is ignored
 				}
@@ -178,7 +178,7 @@ export class SaveErrorHandler extends Disposable implements ISaveErrorHandler, I
 		const actions: INotificationActions = { primary: primaryActions, secondary: secondaryActions };
 		const handle = this.notificationService.notify({ severity: Severity.Error, message, actions });
 		Event.once(handle.onDidClose)(() => { dispose(primaryActions), dispose(secondaryActions); });
-		this.messages.set(model.getResource(), handle);
+		this.messages.set(model.resource, handle);
 	}
 
 	dispose(): void {
@@ -236,16 +236,16 @@ class ResolveSaveConflictAction extends Action {
 		@IEditorService private readonly editorService: IEditorService,
 		@INotificationService private readonly notificationService: INotificationService,
 		@IInstantiationService private readonly instantiationService: IInstantiationService,
-		@IEnvironmentService private readonly environmentService: IEnvironmentService
+		@IProductService private readonly productService: IProductService
 	) {
 		super('workbench.files.action.resolveConflict', nls.localize('compareChanges', "Compare"));
 	}
 
 	async run(): Promise<any> {
 		if (!this.model.isDisposed()) {
-			const resource = this.model.getResource();
+			const resource = this.model.resource;
 			const name = basename(resource);
-			const editorLabel = nls.localize('saveConflictDiffLabel', "{0} (in file) ↔ {1} (in {2}) - Resolve save conflict", name, name, this.environmentService.appNameLong);
+			const editorLabel = nls.localize('saveConflictDiffLabel', "{0} (in file) ↔ {1} (in {2}) - Resolve save conflict", name, name, this.productService.nameLong);
 
 			await TextFileContentProvider.open(resource, CONFLICT_RESOLUTION_SCHEME, editorLabel, this.editorService, { pinned: true });
 
@@ -332,7 +332,7 @@ export const acceptLocalChangesCommand = async (accessor: ServicesAccessor, reso
 	await model.save();
 
 	// Reopen file input
-	await editorService.openEditor({ resource: model.getResource() }, group);
+	await editorService.openEditor({ resource: model.resource }, group);
 
 	// Clean up
 	group.closeEditor(editor);
@@ -361,7 +361,7 @@ export const revertLocalChangesCommand = async (accessor: ServicesAccessor, reso
 	await model.revert();
 
 	// Reopen file input
-	await editorService.openEditor({ resource: model.getResource() }, group);
+	await editorService.openEditor({ resource: model.resource }, group);
 
 	// Clean up
 	group.closeEditor(editor);

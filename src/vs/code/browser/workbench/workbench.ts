@@ -202,31 +202,25 @@ class PollingURLCallbackProvider extends Disposable implements IURLCallbackProvi
 
 class WorkspaceProvider implements IWorkspaceProvider {
 
-	constructor(public readonly workspace: IWorkspace) { }
+	static QUERY_PARAM_EMPTY_WINDOW = 'ew';
+	static QUERY_PARAM_FOLDER = 'folder';
+	static QUERY_PARAM_WORKSPACE = 'workspace';
 
-	async open(workspace: IWorkspace, options?: { reuse?: boolean }): Promise<void> {
-		if (options && options.reuse && this.isSame(this.workspace, workspace)) {
-			return; // return early if workspace is not changing and we are reusing window
+	static QUERY_PARAM_PAYLOAD = 'payload';
+
+	constructor(
+		public readonly workspace: IWorkspace,
+		public readonly payload: object
+	) { }
+
+	async open(workspace: IWorkspace, options?: { reuse?: boolean, payload?: object }): Promise<void> {
+		if (options?.reuse && !options.payload && this.isSame(this.workspace, workspace)) {
+			return; // return early if workspace and environment is not changing and we are reusing window
 		}
 
-		// Empty
-		let targetHref: string | undefined = undefined;
-		if (!workspace) {
-			targetHref = `${document.location.origin}${document.location.pathname}?ew=true`;
-		}
-
-		// Folder
-		else if (isFolderToOpen(workspace)) {
-			targetHref = `${document.location.origin}${document.location.pathname}?folder=${workspace.folderUri.path}`;
-		}
-
-		// Workspace
-		else if (isWorkspaceToOpen(workspace)) {
-			targetHref = `${document.location.origin}${document.location.pathname}?workspace=${workspace.workspaceUri.path}`;
-		}
-
+		const targetHref = this.createTargetUrl(workspace, options);
 		if (targetHref) {
-			if (options && options.reuse) {
+			if (options?.reuse) {
 				window.location.href = targetHref;
 			} else {
 				if (isStandalone) {
@@ -236,6 +230,32 @@ class WorkspaceProvider implements IWorkspaceProvider {
 				}
 			}
 		}
+	}
+
+	private createTargetUrl(workspace: IWorkspace, options?: { reuse?: boolean, payload?: object }): string | undefined {
+
+		// Empty
+		let targetHref: string | undefined = undefined;
+		if (!workspace) {
+			targetHref = `${document.location.origin}${document.location.pathname}?${WorkspaceProvider.QUERY_PARAM_EMPTY_WINDOW}=true`;
+		}
+
+		// Folder
+		else if (isFolderToOpen(workspace)) {
+			targetHref = `${document.location.origin}${document.location.pathname}?${WorkspaceProvider.QUERY_PARAM_FOLDER}=${encodeURIComponent(workspace.folderUri.toString())}`;
+		}
+
+		// Workspace
+		else if (isWorkspaceToOpen(workspace)) {
+			targetHref = `${document.location.origin}${document.location.pathname}?${WorkspaceProvider.QUERY_PARAM_WORKSPACE}=${encodeURIComponent(workspace.workspaceUri.toString())}`;
+		}
+
+		// Append payload if any
+		if (options?.payload) {
+			targetHref += `&${WorkspaceProvider.QUERY_PARAM_PAYLOAD}=${encodeURIComponent(JSON.stringify(options.payload))}`;
+		}
+
+		return targetHref;
 	}
 
 	private isSame(workspaceA: IWorkspace, workspaceB: IWorkspace): boolean {
@@ -255,21 +275,74 @@ class WorkspaceProvider implements IWorkspaceProvider {
 	}
 }
 
-const configElement = document.getElementById('vscode-workbench-web-configuration');
-const configElementAttribute = configElement ? configElement.getAttribute('data-settings') : undefined;
-if (!configElement || !configElementAttribute) {
-	throw new Error('Missing web configuration element');
-}
+(function () {
 
-const options: IWorkbenchConstructionOptions & { folderUri?: UriComponents, workspaceUri?: UriComponents } = JSON.parse(configElementAttribute);
-options.workspaceProvider = new WorkspaceProvider(options.folderUri ? { folderUri: URI.revive(options.folderUri) } : options.workspaceUri ? { workspaceUri: URI.revive(options.workspaceUri) } : undefined);
-options.urlCallbackProvider = new PollingURLCallbackProvider();
-options.credentialsProvider = new LocalStorageCredentialsProvider();
+	// Find config by checking for DOM
+	const configElement = document.getElementById('vscode-workbench-web-configuration');
+	const configElementAttribute = configElement ? configElement.getAttribute('data-settings') : undefined;
+	if (!configElement || !configElementAttribute) {
+		throw new Error('Missing web configuration element');
+	}
 
-if (Array.isArray(options.staticExtensions)) {
-	options.staticExtensions.forEach(extension => {
-		extension.extensionLocation = URI.revive(extension.extensionLocation);
+	const config: IWorkbenchConstructionOptions & { folderUri?: UriComponents, workspaceUri?: UriComponents } = JSON.parse(configElementAttribute);
+
+	// Revive static extension locations
+	if (Array.isArray(config.staticExtensions)) {
+		config.staticExtensions.forEach(extension => {
+			extension.extensionLocation = URI.revive(extension.extensionLocation);
+		});
+	}
+
+	// Find workspace to open and payload
+	let foundWorkspace = false;
+	let workspace: IWorkspace;
+	let payload = Object.create(null);
+
+	const query = new URL(document.location.href).searchParams;
+	query.forEach((value, key) => {
+		switch (key) {
+
+			// Folder
+			case WorkspaceProvider.QUERY_PARAM_FOLDER:
+				workspace = { folderUri: URI.parse(value) };
+				foundWorkspace = true;
+				break;
+
+			// Workspace
+			case WorkspaceProvider.QUERY_PARAM_WORKSPACE:
+				workspace = { workspaceUri: URI.parse(value) };
+				foundWorkspace = true;
+				break;
+
+			// Empty
+			case WorkspaceProvider.QUERY_PARAM_EMPTY_WINDOW:
+				workspace = undefined;
+				foundWorkspace = true;
+				break;
+
+			// Payload
+			case WorkspaceProvider.QUERY_PARAM_PAYLOAD:
+				payload = JSON.parse(value);
+				break;
+		}
 	});
-}
 
-create(document.body, options);
+	// If no workspace is provided through the URL, check for config attribute from server
+	if (!foundWorkspace) {
+		if (config.folderUri) {
+			workspace = { folderUri: URI.revive(config.folderUri) };
+		} else if (config.workspaceUri) {
+			workspace = { workspaceUri: URI.revive(config.workspaceUri) };
+		} else {
+			workspace = undefined;
+		}
+	}
+
+	// Finally create workbench
+	create(document.body, {
+		...config,
+		workspaceProvider: new WorkspaceProvider(workspace, payload),
+		urlCallbackProvider: new PollingURLCallbackProvider(),
+		credentialsProvider: new LocalStorageCredentialsProvider()
+	});
+})();

@@ -139,7 +139,7 @@ export class EditorPart extends Part implements IEditorGroupsService, IEditorGro
 		@IThemeService themeService: IThemeService,
 		@IConfigurationService private readonly configurationService: IConfigurationService,
 		@IStorageService storageService: IStorageService,
-		@IWorkbenchLayoutService private readonly layoutService: IWorkbenchLayoutService
+		@IWorkbenchLayoutService layoutService: IWorkbenchLayoutService
 	) {
 		super(Parts.EDITOR_PART, { hasTitle: false }, themeService, storageService, layoutService);
 
@@ -494,7 +494,7 @@ export class EditorPart extends Part implements IEditorGroupsService, IEditorGro
 
 		const group = this.doAddGroup(locationView, direction);
 
-		if (options && options.activate) {
+		if (options?.activate) {
 			this.doSetGroupActive(group);
 		}
 
@@ -507,7 +507,7 @@ export class EditorPart extends Part implements IEditorGroupsService, IEditorGro
 		// Add to grid widget
 		this.gridWidget.addView(
 			newGroupView,
-			Sizing.Distribute,
+			this.getSplitSizingStyle(),
 			locationView,
 			this.toGridViewDirection(direction),
 		);
@@ -522,6 +522,10 @@ export class EditorPart extends Part implements IEditorGroupsService, IEditorGro
 		this.notifyGroupIndexChange();
 
 		return newGroupView;
+	}
+
+	private getSplitSizingStyle(): Sizing {
+		return this._partOptions.splitSizing === 'split' ? Sizing.Split : Sizing.Distribute;
 	}
 
 	private doCreateGroupView(from?: IEditorGroupView | ISerializedEditorGroup | null): IEditorGroupView {
@@ -674,7 +678,7 @@ export class EditorPart extends Part implements IEditorGroupsService, IEditorGro
 		}
 
 		// Remove from grid widget & dispose
-		this.gridWidget.removeView(groupView, Sizing.Distribute);
+		this.gridWidget.removeView(groupView, this.getSplitSizingStyle());
 		groupView.dispose();
 
 		// Restore focus if we had it previously (we run this after gridWidget.removeView() is called
@@ -704,7 +708,7 @@ export class EditorPart extends Part implements IEditorGroupsService, IEditorGro
 		const restoreFocus = this.shouldRestoreFocus(sourceView.element);
 
 		// Move through grid widget API
-		this.gridWidget.moveView(sourceView, Sizing.Distribute, targetView, this.toGridViewDirection(direction));
+		this.gridWidget.moveView(sourceView, this.getSplitSizingStyle(), targetView, this.toGridViewDirection(direction));
 
 		// Restore focus if we had it previously (we run this after gridWidget.removeView() is called
 		// because removing a view can mean to reparent it and thus focus would be removed otherwise)
@@ -748,7 +752,7 @@ export class EditorPart extends Part implements IEditorGroupsService, IEditorGro
 			const inactive = !sourceView.isActive(editor) || this._activeGroup !== sourceView;
 			const copyOptions: ICopyEditorOptions = { index, inactive, preserveFocus: inactive };
 
-			if (options && options.mode === MergeGroupMode.COPY_EDITORS) {
+			if (options?.mode === MergeGroupMode.COPY_EDITORS) {
 				sourceView.copyEditor(editor, targetView, copyOptions);
 			} else {
 				sourceView.moveEditor(editor, targetView, copyOptions);
@@ -778,10 +782,6 @@ export class EditorPart extends Part implements IEditorGroupsService, IEditorGro
 		}
 
 		return groupView;
-	}
-
-	createEditorDropTarget(container: HTMLElement, delegate: EditorDropTargetDelegate): IDisposable {
-		return this.instantiationService.createInstance(EditorDropTarget, this, container, delegate);
 	}
 
 	//#endregion
@@ -874,7 +874,7 @@ export class EditorPart extends Part implements IEditorGroupsService, IEditorGro
 
 	private doCreateGridControlWithPreviousState(): boolean {
 		const uiState: IEditorPartUIState = this.workspaceMemento[EditorPart.EDITOR_PART_UI_STATE_STORAGE_KEY];
-		if (uiState && uiState.serializedGrid) {
+		if (uiState?.serializedGrid) {
 			try {
 
 				// MRU
@@ -1043,6 +1043,14 @@ export class EditorPart extends Part implements IEditorGroupsService, IEditorGro
 			type: Parts.EDITOR_PART
 		};
 	}
+
+	//#region TODO@matt this should move into some kind of service
+
+	createEditorDropTarget(container: HTMLElement, delegate: EditorDropTargetDelegate): IDisposable {
+		return this.instantiationService.createInstance(EditorDropTarget, this, container, delegate);
+	}
+
+	//#endregion
 }
 
 registerSingleton(IEditorGroupsService, EditorPart);
